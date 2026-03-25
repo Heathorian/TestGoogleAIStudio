@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --color-chess-dark: #312e2b;
+  --color-chess-darker: #262421;
+  --color-chess-green: #81b64c;
+  --color-chess-gray: #3b3835;
+  --color-chess-light-gray: #989795;
+}
+
+@layer base {
+  body {
+    @apply bg-chess-darker text-white font-sans;
+  }
+}
