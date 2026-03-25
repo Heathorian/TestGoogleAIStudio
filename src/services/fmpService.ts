@@ -55,12 +55,13 @@ export const fetchStockQuotes = async (symbols: string[]): Promise<StockQuote[]>
       .map((q) => {
         const obj = q as Record<string, unknown>;
         const symbol = String(obj.symbol ?? obj.ticker ?? '').trim();
-        const name = String(obj.name ?? obj.companyName ?? '').trim();
+        const nameFromApi = String(obj.name ?? obj.companyName ?? '').trim();
+        const name = nameFromApi || symbol;
         const priceRaw = obj.price ?? obj.lastPrice ?? obj.close ?? obj.adjClose;
         const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
         return { symbol, name, price };
       })
-      .filter((q) => q.symbol && q.name && Number.isFinite(q.price));
+      .filter((q) => q.symbol && Number.isFinite(q.price));
   } catch (error) {
     console.error('Error fetching stock quotes from FMP:', error);
     return [];
