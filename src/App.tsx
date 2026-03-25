@@ -166,18 +166,20 @@ export default function App() {
       if (error) throw error;
 
       if (data && data.length > 0) {
-        const tickers = data.map(s => s.ticker);
+        const tickers = data.map((s) => s.ticker.toUpperCase().trim());
         const quotes = await fetchStockQuotes(tickers);
         
         const mappedStocks: Stock[] = data.map((s) => {
-          const quote = quotes.find((q) => q.symbol === s.ticker);
-          // Always prefer FMP real-time price (fallback to 0 if FMP didn't return a price).
-          // This avoids displaying potentially stale Supabase-stored values.
-          const currentPrice = quote && Number.isFinite(quote.price) ? quote.price : 0;
+          const portfolioTicker = s.ticker.toUpperCase().trim();
+          const quote = quotes.find((q) => q.symbol === portfolioTicker);
+
+          // Prefer FMP real-time price; if it fails for a ticker, fall back to the stored Supabase value.
+          const currentPrice =
+            quote && Number.isFinite(quote.price) ? quote.price : s.current_price;
 
           return {
             id: s.id,
-            ticker: s.ticker,
+            ticker: portfolioTicker,
             name: s.name,
             shares: s.shares,
             avgCost: s.avg_cost,
