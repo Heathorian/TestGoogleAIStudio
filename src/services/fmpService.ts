@@ -1,7 +1,10 @@
-const FMP_API_KEY =
-  (import.meta as { env?: { VITE_FMP_API_KEY?: string } }).env?.VITE_FMP_API_KEY ||
-  'kllqYJQpey9ZwAVwrlwR4p3yU1wFrqDF';
-const BASE_URL = 'https://financialmodelingprep.com/stable';
+const ALPHA_VANTAGE_API_KEY = (import.meta as {
+  env?: { VITE_ALPHA_VANTAGE_API_KEY?: string };
+}).env?.VITE_ALPHA_VANTAGE_API_KEY;
+
+const BASE_URL = 'https://www.alphavantage.co/query';
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export interface StockQuote {
   symbol: string;
@@ -19,59 +22,81 @@ export const fetchStockSearch = async (query: string, limit = 10): Promise<Stock
   if (!trimmed) return [];
 
   try {
+    if (!ALPHA_VANTAGE_API_KEY) return [];
+
     const response = await fetch(
-      `${BASE_URL}/search-symbol?query=${encodeURIComponent(trimmed)}&limit=${limit}&apikey=${FMP_API_KEY}`
+      `${BASE_URL}?function=SYMBOL_SEARCH&keywords=${encodeURIComponent(trimmed)}&apikey=${ALPHA_VANTAGE_API_KEY}`
     );
     if (!response.ok) {
-      throw new Error(`FMP search error: ${response.statusText}`);
+      throw new Error(`Alpha Vantage search error: ${response.statusText}`);
     }
 
-    const data = await response.json();
-    // FMP returns an array of results with fields like: symbol, name (and more).
-    return (data as Array<{ symbol?: string; name?: string }>)
-      .filter((r) => r.symbol && r.name)
+    const data: unknown = await response.json();
+    const json = data as { bestMatches?: Array<Record<string, unknown>> };
+    const matches = Array.isArray(json.bestMatches) ? json.bestMatches : [];
+
+    return matches
       .slice(0, limit)
-      .map((r) => ({ symbol: r.symbol as string, name: r.name as string }));
+      .map((m) => {
+        const symbol = String(m['1. symbol'] ?? '').trim().toUpperCase();
+        const name = String(m['2. name'] ?? '').trim();
+        return { symbol, name };
+      })
+      .filter((r) => r.symbol && r.name);
   } catch (error) {
-    console.error('Error searching stock symbols from FMP:', error);
+    console.error('Error searching stock symbols from Alpha Vantage:', error);
     return [];
   }
+};
+
+const fetchAlphaGlobalQuote = async (
+  symbol: string,
+  attempt = 0
+): Promise<StockQuote | null> => {
+  if (!ALPHA_VANTAGE_API_KEY) return null;
+
+  const url = `${BASE_URL}?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${ALPHA_VANTAGE_API_KEY}`;
+
+  const response = await fetch(url);
+  if (!response.ok) return null;
+
+  const data: unknown = await response.json();
+  const json = data as Record<string, unknown>;
+
+  // Rate limit message example:
+  // { "Note": "Thank you for using Alpha Vantage! Our standard API call frequency is 5 calls per minute..." }
+  if (typeof json.Note === 'string' && attempt === 0) {
+    await delay(12000);
+    return fetchAlphaGlobalQuote(symbol, attempt + 1);
+  }
+
+  const globalQuote = json['Global Quote'] as Record<string, unknown> | undefined;
+  if (!globalQuote) return null;
+
+  const priceRaw = globalQuote['05. price'];
+  const price = typeof priceRaw === 'string' ? Number(priceRaw) : Number(priceRaw);
+
+  if (!Number.isFinite(price)) return null;
+
+  // Alpha's GLOBAL_QUOTE doesn't return the company name; keep it empty so callers can fallback.
+  return { symbol: symbol.toUpperCase(), name: '', price };
 };
 
 export const fetchStockQuotes = async (symbols: string[]): Promise<StockQuote[]> => {
   if (symbols.length === 0) return [];
 
-  // `stable/quote?symbol=` expects ONE symbol.
-  // Passing multiple symbols (e.g. comma-separated) may hit premium/special endpoints.
-  // So we query each symbol individually and merge results.
-  const unique = Array.from(new Set(symbols.map((s) => s.trim()).filter(Boolean)));
+  const unique = Array.from(new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)));
   const results: StockQuote[] = [];
 
+  // Sequential to avoid triggering Alpha Vantage rate limits.
   for (const symbol of unique) {
     try {
-      const response = await fetch(
-        `${BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`
-      );
-      if (!response.ok) continue;
-
-      const data: unknown = await response.json();
-      const arr = Array.isArray(data) ? data : [data];
-
-      const quote = (arr as Array<unknown>)
-        .map((q) => q as Record<string, unknown>)
-        .map((obj) => {
-          const normalizedSymbol = String(obj.symbol ?? obj.ticker ?? '').trim();
-          const nameFromApi = String(obj.name ?? obj.companyName ?? '').trim();
-          const name = nameFromApi || normalizedSymbol;
-          const priceRaw = obj.price ?? obj.lastPrice ?? obj.close ?? obj.adjClose;
-          const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
-          return { symbol: normalizedSymbol, name, price };
-        })
-        .find((q) => q.symbol && Number.isFinite(q.price));
-
+      const quote = await fetchAlphaGlobalQuote(symbol);
       if (quote) results.push(quote);
+      // Small pause between calls to reduce risk of hitting "frequency" notes.
+      await delay(1000);
     } catch (error) {
-      console.error(`Error fetching FMP quote for ${symbol}:`, error);
+      console.error(`Error fetching Alpha Vantage quote for ${symbol}:`, error);
     }
   }
 
