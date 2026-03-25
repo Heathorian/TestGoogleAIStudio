@@ -13,6 +13,7 @@ import {
   Trash2, 
   ChevronRight, 
   Search,
+  LogIn,
   ArrowUpRight,
   ArrowDownRight,
   Award,
@@ -24,7 +25,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
-import { fetchStockQuotes, fetchStockQuote } from './services/fmpService';
+import { fetchStockQuotes, fetchStockQuote, fetchStockSearch, StockSearchResult } from './services/fmpService';
 
 // --- Types ---
 
@@ -134,11 +135,19 @@ const ProgressBar = ({ progress }: { progress: number }) => (
 );
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'portfolio' | 'academy' | 'insights'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'portfolio' | 'academy' | 'insights' | 'login'>('dashboard');
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newStock, setNewStock] = useState({ ticker: '', name: '', shares: '', avgCost: '' });
+  const [stockSearchResults, setStockSearchResults] = useState<StockSearchResult[]>([]);
+  const [stockSearchLoading, setStockSearchLoading] = useState(false);
+  const [showStockSearchResults, setShowStockSearchResults] = useState(false);
+  const [stockSearchLoaded, setStockSearchLoaded] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
 
   // --- Supabase Sync ---
 
@@ -185,6 +194,61 @@ export default function App() {
     }
   };
 
+  const handleSelectStockSearch = (result: StockSearchResult) => {
+    setNewStock((prev) => ({ ...prev, ticker: result.symbol, name: result.name }));
+    setStockSearchResults([]);
+    setShowStockSearchResults(false);
+    setStockSearchLoaded(false);
+  };
+
+  useEffect(() => {
+    if (!showAddModal) return;
+
+    const q = newStock.ticker.trim();
+    if (q.length < 2) {
+      setStockSearchResults([]);
+      setShowStockSearchResults(false);
+      setStockSearchLoaded(false);
+      return;
+    }
+
+    let cancelled = false;
+    setStockSearchLoading(true);
+    setStockSearchLoaded(false);
+
+    const timeoutId = window.setTimeout(async () => {
+      const results = await fetchStockSearch(q, 8);
+      if (cancelled) return;
+      setStockSearchResults(results);
+      setShowStockSearchResults(results.length > 0);
+      setStockSearchLoaded(true);
+      setStockSearchLoading(false);
+    }, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [showAddModal, newStock.ticker]);
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: loginEmail.trim(),
+        password: loginPassword,
+      });
+      if (error) throw error;
+      setActiveTab('dashboard');
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : 'Login failed');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
   // --- Calculations ---
 
   const totalValue = useMemo(() => stocks.reduce((acc, s) => acc + s.shares * s.currentPrice, 0), [stocks]);
@@ -205,7 +269,7 @@ export default function App() {
       // Fetch real-time price for the new stock
       const quote = await fetchStockQuote(ticker);
       const currentPrice = quote ? quote.price : avgCost;
-      const stockName = quote ? quote.name : newStock.name;
+      const stockName = quote?.name || newStock.name || ticker;
 
       const { data, error } = await supabase
         .from('stocks')
@@ -312,6 +376,12 @@ export default function App() {
             label="Insights" 
             active={activeTab === 'insights'} 
             onClick={() => setActiveTab('insights')} 
+          />
+          <SidebarItem
+            icon={LogIn}
+            label="Login"
+            active={activeTab === 'login'}
+            onClick={() => setActiveTab('login')}
           />
         </nav>
 
@@ -629,6 +699,76 @@ export default function App() {
             </motion.div>
           )}
 
+          {activeTab === 'login' && (
+            <motion.div
+              key="login"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="max-w-md mx-auto space-y-6"
+            >
+              <header className="text-center space-y-2">
+                <p className="text-chess-green font-black uppercase tracking-[0.2em] text-sm">Sign In</p>
+                <h2 className="text-4xl font-black tracking-tight">Login</h2>
+                <p className="text-chess-light-gray">
+                  Access your saved portfolio and settings.
+                </p>
+              </header>
+
+              <Card className="p-6">
+                <form onSubmit={handleLogin} className="space-y-4">
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-chess-light-gray uppercase">Email</label>
+                    <input
+                      required
+                      type="email"
+                      value={loginEmail}
+                      onChange={(e) => setLoginEmail(e.target.value)}
+                      className="w-full bg-chess-darker border border-chess-gray/50 rounded-xl px-4 py-3 focus:border-chess-green focus:outline-none transition-colors font-bold"
+                      placeholder="you@example.com"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-xs font-black text-chess-light-gray uppercase">Password</label>
+                    <input
+                      required
+                      type="password"
+                      value={loginPassword}
+                      onChange={(e) => setLoginPassword(e.target.value)}
+                      className="w-full bg-chess-darker border border-chess-gray/50 rounded-xl px-4 py-3 focus:border-chess-green focus:outline-none transition-colors font-bold"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  {loginError && (
+                    <div className="bg-red-500/10 border border-red-500/30 text-red-200 px-4 py-3 rounded-xl text-sm font-bold">
+                      {loginError}
+                    </div>
+                  )}
+
+                  <button
+                    type="submit"
+                    disabled={loginLoading}
+                    className="w-full py-3 rounded-xl font-black bg-chess-green text-chess-darker hover:bg-chess-green/90 transition-colors shadow-lg shadow-chess-green/20 disabled:opacity-50"
+                  >
+                    {loginLoading ? 'Signing in...' : 'Sign In'}
+                  </button>
+                </form>
+
+                <div className="mt-4 text-center">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('dashboard')}
+                    className="text-chess-light-gray hover:underline text-sm font-bold"
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+              </Card>
+            </motion.div>
+          )}
+
           {activeTab === 'insights' && (
             <motion.div
               key="insights"
@@ -676,19 +816,65 @@ export default function App() {
               <form onSubmit={handleAddStock} className="space-y-4">
                 <div className="space-y-1">
                   <label className="text-xs font-black text-chess-light-gray uppercase">Ticker Symbol</label>
-                  <input 
-                    required
-                    type="text"
-                    placeholder="e.g. AAPL"
-                    value={newStock.ticker}
-                    onChange={e => setNewStock({...newStock, ticker: e.target.value})}
-                    className="w-full bg-chess-darker border border-chess-gray/50 rounded-xl px-4 py-3 focus:border-chess-green focus:outline-none transition-colors font-bold uppercase"
-                  />
+                  <div className="relative">
+                    <input
+                      required
+                      type="text"
+                      placeholder="e.g. AAPL"
+                      value={newStock.ticker}
+                      onChange={(e) =>
+                        setNewStock({
+                          ...newStock,
+                          ticker: e.target.value.toUpperCase(),
+                        })
+                      }
+                      onFocus={() => {
+                        if (stockSearchResults.length > 0) setShowStockSearchResults(true);
+                      }}
+                      onBlur={() =>
+                        window.setTimeout(() => {
+                          setShowStockSearchResults(false);
+                        }, 150)
+                      }
+                      className="w-full bg-chess-darker border border-chess-gray/50 rounded-xl px-4 py-3 focus:border-chess-green focus:outline-none transition-colors font-bold uppercase"
+                    />
+
+                    {newStock.ticker.trim().length >= 2 && (stockSearchLoading || stockSearchLoaded) && (
+                      <div className="absolute left-0 right-0 mt-2 bg-chess-dark border border-chess-gray/50 rounded-xl shadow-2xl max-h-60 overflow-auto z-20">
+                        {stockSearchLoading && (
+                          <div className="px-4 py-3 text-xs font-bold text-chess-light-gray">Searching...</div>
+                        )}
+
+                        {!stockSearchLoading && stockSearchResults.length === 0 && (
+                          <div className="px-4 py-3 text-xs font-bold text-chess-light-gray">No matching stocks</div>
+                        )}
+
+                        {!stockSearchLoading &&
+                          stockSearchResults.map((r) => (
+                            <button
+                              key={r.symbol}
+                              type="button"
+                              onMouseDown={(e) => {
+                                // Prevent input blur from hiding results before selection.
+                                e.preventDefault();
+                                handleSelectStockSearch(r);
+                              }}
+                              className="w-full px-4 py-3 text-left hover:bg-chess-gray/30 transition-colors border-b border-chess-gray/20 last:border-b-0"
+                            >
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-chess-green font-black uppercase">{r.symbol}</span>
+                                <span className="text-[11px] font-black text-chess-light-gray opacity-70">FMP</span>
+                              </div>
+                              <div className="text-xs font-bold text-chess-light-gray mt-1 truncate">{r.name}</div>
+                            </button>
+                          ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-black text-chess-light-gray uppercase">Company Name</label>
                   <input 
-                    required
                     type="text"
                     placeholder="e.g. Apple Inc."
                     value={newStock.name}
