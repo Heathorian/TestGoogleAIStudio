@@ -169,15 +169,18 @@ export default function App() {
         const tickers = data.map(s => s.ticker);
         const quotes = await fetchStockQuotes(tickers);
         
-        const mappedStocks: Stock[] = data.map(s => {
-          const quote = quotes.find(q => q.symbol === s.ticker);
+        const mappedStocks: Stock[] = data.map((s) => {
+          const quote = quotes.find((q) => q.symbol === s.ticker);
+          const currentPrice =
+            quote && Number.isFinite(quote.price) ? quote.price : s.current_price;
+
           return {
             id: s.id,
             ticker: s.ticker,
             name: s.name,
             shares: s.shares,
             avgCost: s.avg_cost,
-            currentPrice: quote ? quote.price : s.current_price
+            currentPrice,
           };
         });
         setStocks(mappedStocks);
@@ -268,7 +271,7 @@ export default function App() {
     try {
       // Fetch real-time price for the new stock
       const quote = await fetchStockQuote(ticker);
-      const currentPrice = quote ? quote.price : avgCost;
+      const currentPrice = quote && Number.isFinite(quote.price) ? quote.price : avgCost;
       const stockName = quote?.name || newStock.name || ticker;
 
       const { data, error } = await supabase
