@@ -171,8 +171,9 @@ export default function App() {
         
         const mappedStocks: Stock[] = data.map((s) => {
           const quote = quotes.find((q) => q.symbol === s.ticker);
-          const currentPrice =
-            quote && Number.isFinite(quote.price) ? quote.price : s.current_price;
+          // Always prefer FMP real-time price (fallback to 0 if FMP didn't return a price).
+          // This avoids displaying potentially stale Supabase-stored values.
+          const currentPrice = quote && Number.isFinite(quote.price) ? quote.price : 0;
 
           return {
             id: s.id,
