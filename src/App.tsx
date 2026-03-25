@@ -25,7 +25,14 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { supabase } from './lib/supabase';
-import { fetchStockQuotes, fetchStockQuote, fetchStockSearch, StockSearchResult } from './services/fmpService';
+import {
+  fetchStockQuotes,
+  fetchStockQuote,
+  fetchStockSearch,
+  fetchTopAnalystRecommendations,
+  StockSearchResult,
+  AnalystConsensus,
+} from './services/fmpService';
 
 // --- Types ---
 
@@ -41,7 +48,7 @@ interface Stock {
 interface Recommendation {
   ticker: string;
   name: string;
-  consensus: 'Strong Buy' | 'Buy' | 'Hold';
+  consensus: AnalystConsensus;
   why: string;
 }
 
@@ -148,11 +155,24 @@ export default function App() {
   const [loginPassword, setLoginPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>(RECOMMENDATIONS);
 
   // --- Supabase Sync ---
 
   useEffect(() => {
     fetchStocks();
+  }, []);
+
+  useEffect(() => {
+    const loadRecommendations = async () => {
+      const topTickers = ['NVDA', 'AMZN', 'GOOGL', 'META', 'V'];
+      const liveRecommendations = await fetchTopAnalystRecommendations(topTickers, 5);
+      if (liveRecommendations.length > 0) {
+        setRecommendations(liveRecommendations);
+      }
+    };
+
+    loadRecommendations();
   }, []);
 
   const fetchStocks = async () => {
@@ -522,7 +542,7 @@ export default function App() {
                     <span className="text-xs bg-chess-gray px-2 py-1 rounded font-bold text-chess-light-gray">MAR 25</span>
                   </div>
                   <div className="space-y-4">
-                    {RECOMMENDATIONS.map((rec, idx) => (
+                    {recommendations.map((rec, idx) => (
                       <motion.div
                         key={rec.ticker}
                         initial={{ opacity: 0, x: 20 }}
@@ -538,7 +558,9 @@ export default function App() {
                             <span className={`text-[10px] uppercase font-black px-2 py-1 rounded ${
                               rec.consensus === 'Strong Buy' ? 'bg-chess-green text-chess-darker' : 
                               rec.consensus === 'Buy' ? 'bg-chess-green/20 text-chess-green border border-chess-green/30' : 
-                              'bg-chess-gray text-chess-light-gray'
+                              rec.consensus === 'Hold' ? 'bg-chess-gray text-chess-light-gray' :
+                              rec.consensus === 'Sell' ? 'bg-red-500/20 text-red-300 border border-red-400/30' :
+                              'bg-red-500 text-white'
                             }`}>
                               {rec.consensus}
                             </span>

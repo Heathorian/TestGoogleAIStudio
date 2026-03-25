@@ -17,6 +17,114 @@ export interface StockSearchResult {
   name: string;
 }
 
+export type AnalystConsensus =
+  | 'Strong Buy'
+  | 'Buy'
+  | 'Hold'
+  | 'Sell'
+  | 'Strong Sell';
+
+export interface AnalystRecommendation {
+  ticker: string;
+  name: string;
+  consensus: AnalystConsensus;
+  why: string;
+}
+
+const normalizeConsensus = (value: string): AnalystConsensus | null => {
+  const normalized = value.trim().toLowerCase().replace(/[-_]/g, ' ');
+  if (!normalized) return null;
+  if (normalized.includes('strong buy')) return 'Strong Buy';
+  if (normalized.includes('buy')) return 'Buy';
+  if (normalized.includes('hold')) return 'Hold';
+  if (normalized.includes('strong sell')) return 'Strong Sell';
+  if (normalized.includes('sell')) return 'Sell';
+  return null;
+};
+
+const mapAlphaSentimentToConsensus = (label: string): AnalystConsensus | null => {
+  const normalized = label.trim().toLowerCase().replace(/[-_]/g, ' ');
+  if (normalized.includes('very bullish') || normalized.includes('extremely bullish')) return 'Strong Buy';
+  if (normalized.includes('bullish')) return 'Buy';
+  if (normalized.includes('neutral')) return 'Hold';
+  if (normalized.includes('very bearish') || normalized.includes('extremely bearish')) return 'Strong Sell';
+  if (normalized.includes('bearish')) return 'Sell';
+  return null;
+};
+
+export const fetchTopAnalystRecommendations = async (
+  symbols: string[],
+  limit = 5
+): Promise<AnalystRecommendation[]> => {
+  if (!ALPHA_VANTAGE_API_KEY || symbols.length === 0) return [];
+
+  const uniqueSymbols = Array.from(
+    new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean))
+  );
+
+  const recommendations: AnalystRecommendation[] = [];
+
+  for (const symbol of uniqueSymbols) {
+    try {
+      const response = await fetch(
+        `${BASE_URL}?function=NEWS_SENTIMENT&tickers=${encodeURIComponent(symbol)}&limit=50&apikey=${ALPHA_VANTAGE_API_KEY}`
+      );
+      if (!response.ok) continue;
+
+      const payload: unknown = await response.json();
+      const json = payload as { feed?: Array<Record<string, unknown>> };
+      const feed = Array.isArray(json.feed) ? json.feed : [];
+
+      const counts: Record<AnalystConsensus, number> = {
+        'Strong Buy': 0,
+        Buy: 0,
+        Hold: 0,
+        Sell: 0,
+        'Strong Sell': 0,
+      };
+
+      for (const item of feed) {
+        const tickerSentiment = Array.isArray(item.ticker_sentiment)
+          ? (item.ticker_sentiment as Array<Record<string, unknown>>)
+          : [];
+
+        for (const ts of tickerSentiment) {
+          const tsTicker = String(ts.ticker ?? '').toUpperCase().trim();
+          if (tsTicker !== symbol) continue;
+          const label = String(ts.ticker_sentiment_label ?? '');
+          const mapped = mapAlphaSentimentToConsensus(label);
+          if (mapped) counts[mapped] += 1;
+        }
+      }
+
+      const ranked = (Object.entries(counts) as Array<[AnalystConsensus, number]>).sort(
+        (a, b) => b[1] - a[1]
+      );
+      const [consensus, total] = ranked[0];
+      if (!consensus || !total) continue;
+
+      const summary = ranked
+        .filter(([, count]) => count > 0)
+        .map(([label, count]) => `${count} ${label.toLowerCase()}`)
+        .join(', ');
+
+      recommendations.push({
+        ticker: symbol,
+        name: symbol,
+        consensus,
+        why: `Alpha Vantage sentiment distribution: ${summary}.`,
+      });
+
+      if (recommendations.length >= limit) break;
+      await delay(1000);
+    } catch (error) {
+      console.error(`Error fetching analyst recommendations for ${symbol}:`, error);
+    }
+  }
+
+  return recommendations;
+};
+
 export const fetchStockSearch = async (query: string, limit = 10): Promise<StockSearchResult[]> => {
   const trimmed = query.trim();
   if (!trimmed) return [];
