@@ -1,31 +1,12 @@
 const FMP_API_KEY =
   (import.meta as { env?: { VITE_FMP_API_KEY?: string } }).env?.VITE_FMP_API_KEY ||
   'kllqYJQpey9ZwAVwrlwR4p3yU1wFrqDF';
-const BASE_URL = 'https://financialmodelingprep.com/stable/';
+const BASE_URL = 'https://financialmodelingprep.com/stable';
 
 export interface StockQuote {
   symbol: string;
   name: string;
   price: number;
-  changesPercentage: number;
-  change: number;
-  dayLow: number;
-  dayHigh: number;
-  yearHigh: number;
-  yearLow: number;
-  marketCap: number;
-  priceAvg50: number;
-  priceAvg200: number;
-  volume: number;
-  avgVolume: number;
-  exchange: string;
-  open: number;
-  previousClose: number;
-  eps: number;
-  pe: number;
-  earningsAnnouncement: string;
-  sharesOutstanding: number;
-  timestamp: number;
 }
 
 export interface StockSearchResult {
@@ -39,7 +20,7 @@ export const fetchStockSearch = async (query: string, limit = 10): Promise<Stock
 
   try {
     const response = await fetch(
-      `${BASE_URL}/search?query=${encodeURIComponent(trimmed)}&limit=${limit}&apikey=${FMP_API_KEY}`
+      `${BASE_URL}/search-symbol?query=${encodeURIComponent(trimmed)}&limit=${limit}&apikey=${FMP_API_KEY}`
     );
     if (!response.ok) {
       throw new Error(`FMP search error: ${response.statusText}`);
@@ -62,12 +43,24 @@ export const fetchStockQuotes = async (symbols: string[]): Promise<StockQuote[]>
   
   const symbolString = symbols.join(',');
   try {
-    const response = await fetch(`${BASE_URL}/quote/${symbolString}?apikey=${FMP_API_KEY}`);
+    const response = await fetch(`${BASE_URL}/quote?symbol=${symbolString}&apikey=${FMP_API_KEY}`);
     if (!response.ok) {
       throw new Error(`FMP API error: ${response.statusText}`);
     }
-    const data = await response.json();
-    return data as StockQuote[];
+    const data: unknown = await response.json();
+    const arr = Array.isArray(data) ? data : [];
+
+    // Normalize to only fields we need in the UI.
+    return arr
+      .map((q) => {
+        const obj = q as Record<string, unknown>;
+        const symbol = String(obj.symbol ?? obj.ticker ?? '').trim();
+        const name = String(obj.name ?? obj.companyName ?? '').trim();
+        const priceRaw = obj.price ?? obj.lastPrice ?? obj.close ?? obj.adjClose;
+        const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
+        return { symbol, name, price };
+      })
+      .filter((q) => q.symbol && q.name && Number.isFinite(q.price));
   } catch (error) {
     console.error('Error fetching stock quotes from FMP:', error);
     return [];
@@ -78,4 +71,3 @@ export const fetchStockQuote = async (symbol: string): Promise<StockQuote | null
   const quotes = await fetchStockQuotes([symbol]);
   return quotes.length > 0 ? quotes[0] : null;
 };
-
