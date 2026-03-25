@@ -1,4 +1,4 @@
-onst FMP_API_KEY = import.meta.env.VITE_FMP_API_KEY || 'kllqYJQpey9ZwAVwrlwR4p3yU1wFrqDF';
+const FMP_API_KEY = import.meta.env.VITE_FMP_API_KEY || 'kllqYJQpey9ZwAVwrlwR4p3yU1wFrqDF';
 const BASE_URL = 'https://financialmodelingprep.com/api/v3';
 
 export interface StockQuote {
