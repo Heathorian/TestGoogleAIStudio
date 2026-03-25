@@ -40,32 +40,42 @@ export const fetchStockSearch = async (query: string, limit = 10): Promise<Stock
 
 export const fetchStockQuotes = async (symbols: string[]): Promise<StockQuote[]> => {
   if (symbols.length === 0) return [];
-  
-  const symbolString = symbols.join(',');
-  try {
-    const response = await fetch(`${BASE_URL}/quote?symbol=${symbolString}&apikey=${FMP_API_KEY}`);
-    if (!response.ok) {
-      throw new Error(`FMP API error: ${response.statusText}`);
-    }
-    const data: unknown = await response.json();
-    const arr = Array.isArray(data) ? data : [];
 
-    // Normalize to only fields we need in the UI.
-    return arr
-      .map((q) => {
-        const obj = q as Record<string, unknown>;
-        const symbol = String(obj.symbol ?? obj.ticker ?? '').trim();
-        const nameFromApi = String(obj.name ?? obj.companyName ?? '').trim();
-        const name = nameFromApi || symbol;
-        const priceRaw = obj.price ?? obj.lastPrice ?? obj.close ?? obj.adjClose;
-        const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
-        return { symbol, name, price };
-      })
-      .filter((q) => q.symbol && Number.isFinite(q.price));
-  } catch (error) {
-    console.error('Error fetching stock quotes from FMP:', error);
-    return [];
+  // `stable/quote?symbol=` expects ONE symbol.
+  // Passing multiple symbols (e.g. comma-separated) may hit premium/special endpoints.
+  // So we query each symbol individually and merge results.
+  const unique = Array.from(new Set(symbols.map((s) => s.trim()).filter(Boolean)));
+  const results: StockQuote[] = [];
+
+  for (const symbol of unique) {
+    try {
+      const response = await fetch(
+        `${BASE_URL}/quote?symbol=${encodeURIComponent(symbol)}&apikey=${FMP_API_KEY}`
+      );
+      if (!response.ok) continue;
+
+      const data: unknown = await response.json();
+      const arr = Array.isArray(data) ? data : [data];
+
+      const quote = (arr as Array<unknown>)
+        .map((q) => q as Record<string, unknown>)
+        .map((obj) => {
+          const normalizedSymbol = String(obj.symbol ?? obj.ticker ?? '').trim();
+          const nameFromApi = String(obj.name ?? obj.companyName ?? '').trim();
+          const name = nameFromApi || normalizedSymbol;
+          const priceRaw = obj.price ?? obj.lastPrice ?? obj.close ?? obj.adjClose;
+          const price = typeof priceRaw === 'number' ? priceRaw : Number(priceRaw);
+          return { symbol: normalizedSymbol, name, price };
+        })
+        .find((q) => q.symbol && Number.isFinite(q.price));
+
+      if (quote) results.push(quote);
+    } catch (error) {
+      console.error(`Error fetching FMP quote for ${symbol}:`, error);
+    }
   }
+
+  return results;
 };
 
 export const fetchStockQuote = async (symbol: string): Promise<StockQuote | null> => {
